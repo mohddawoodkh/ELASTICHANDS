@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ELASTIC HANDS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #020408;
+    --accent: #00ffe7;
+    --accent2: #ff3c6e;
+    --dim: rgba(0,255,231,0.12);
+    --mono: 'Share Tech Mono', monospace;
+    --display: 'Bebas Neue', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--accent);
+    font-family: var(--mono);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.15) 2px,
+      rgba(0,0,0,0.15) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  #app {
+    position: relative;
+    width: 640px;
+    max-width: 100vw;
+  }
+
+  /* Header */
+  #header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0 4px 6px;
+    border-bottom: 1px solid var(--dim);
+    margin-bottom: 8px;
+  }
+  #title {
+    font-family: var(--display);
+    font-size: 2.2rem;
+    letter-spacing: 4px;
+    color: var(--accent);
+    text-shadow: 0 0 18px var(--accent), 0 0 40px rgba(0,255,231,0.4);
+  }
+  #stats {
+    font-size: 0.68rem;
+    color: rgba(0,255,231,0.6);
+    line-height: 1.6;
+    text-align: right;
+  }
+  #fps { color: var(--accent); font-size: 0.85rem; }
+  #hand-status { font-size: 0.68rem; color: rgba(0,255,231,0.5); }
+
+  /* Canvas stack */
+  #canvas-wrap {
+    position: relative;
+    width: 640px;
+    max-width: 100vw;
+    aspect-ratio: 640/480;
+    border: 1px solid rgba(0,255,231,0.2);
+    box-shadow: 0 0 30px rgba(0,255,231,0.08), inset 0 0 60px rgba(0,0,0,0.6);
+    overflow: hidden;
+    border-radius: 4px;
+  }
+
+  #video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.72;
+    display: none; /* hidden, we draw it to canvas */
+  }
+
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  #bg-canvas   { z-index: 1; }
+  #main-canvas { z-index: 2; }
+
+  /* Corner decorations */
+  .corner {
+    position: absolute;
+    width: 18px; height: 18px;
+    border-color: var(--accent);
+    border-style: solid;
+    opacity: 0.5;
+    z-index: 10;
+  }
+  .corner.tl { top:6px; left:6px;  border-width: 2px 0 0 2px; }
+  .corner.tr { top:6px; right:6px; border-width: 2px 2px 0 0; }
+  .corner.bl { bottom:6px; left:6px;  border-width: 0 0 2px 2px; }
+  .corner.br { bottom:6px; right:6px; border-width: 0 2px 2px 0; }
+
+  /* Status bar */
+  #statusbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 4px 0;
+    font-size: 0.62rem;
+    color: rgba(0,255,231,0.4);
+    letter-spacing: 1px;
+  }
+  #loading-msg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+    background: rgba(2,4,8,0.85);
+    font-size: 0.9rem;
+    gap: 12px;
+    letter-spacing: 2px;
+  }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--dim);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #pinch-l, #pinch-r {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent2);
+    opacity: 0.3;
+    transition: opacity 0.1s, box-shadow 0.1s;
+  }
+  #pinch-l.active, #pinch-r.active {
+    opacity: 1;
+    box-shadow: 0 0 10px var(--accent2);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div id="title">ELASTIC HANDS</div>
+    <div id="stats">
+      <div>FPS <span id="fps">--</span></div>
+      <div id="hand-status">SCANNING…</div>
+    </div>
+  </div>
+
+  <div id="canvas-wrap">
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="bg-canvas"></canvas>
+    <canvas id="main-canvas"></canvas>
+
+    <div id="loading-msg">
+      <div class="spinner"></div>
+      <div>INITIALIZING HAND TRACKING</div>
+      <div style="font-size:0.62rem;opacity:0.5">allow camera access when prompted</div>
+    </div>
+  </div>
+
+  <div id="statusbar">
+    <span>MEDIAPIPE HANDS v0.4 · WEBGL</span>
+    <span>PINCH L <span id="pinch-l"></span> &nbsp; R <span id="pinch-r"></span></span>
+    <span>ELASTIC STRINGS ACTIVE</span>
+  </div>
+</div>
+
+<!-- MediaPipe via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  ELASTIC HANDS — Full pipeline
+//  Sections: Config → State → Smoothing → Physics → Renderer → Tracker → Boot
+// ═══════════════════════════════════════════════════════════
+
+// ─── CONFIG ────────────────────────────────────────────────
+const CFG = {
+  W: 640, H: 480,
+  SMOOTH_FACTOR: 0.55,      // landmark interpolation (0=none, 1=full lag)
+  SPRING_K: 0.12,           // spring stiffness
+  SPRING_DAMPING: 0.72,     // velocity damping
+  PARTICLE_SEGMENTS: 18,    // string subdivision points
+  REST_SEG_LENGTH: 14,      // rest length between segments (px)
+  GRAVITY: 0.18,
+  STRING_WIDTH_MIN: 1.5,
+  STRING_WIDTH_MAX: 5,
+  GLOW_PASSES: 3,
+  PINCH_THRESHOLD: 0.07,    // normalized distance for pinch
+  LANDMARK: {
+    WRIST: 0,
+    THUMB_TIP: 4,
+    INDEX_TIP: 8,
+    MIDDLE_TIP: 12,
+    RING_TIP: 16,
+    PINKY_TIP: 20,
+  },
+  COLORS: {
+    LANDMARK: 'rgba(0,255,231,0.9)',
+    CONNECTION: 'rgba(0,255,231,0.35)',
+    STRING_COLD: [0, 255, 231],
+    STRING_HOT:  [255, 60, 110],
+    PINCH: [255, 200, 0],
+  }
+};
+
+// ─── STATE ─────────────────────────────────────────────────
+const STATE = {
+  hands: [],          // smoothed hand data [{landmarks, handedness}]
+  rawHands: [],       // raw from mediapipe
+  strings: [],        // elastic string systems
+  fps: 0,
+  frameCount: 0,
+  lastFpsTime: performance.now(),
+  pinchL: false,
+  pinchR: false,
+};
+
+// ─── SMOOTHING ─────────────────────────────────────────────
+const smoothedHands = {};   // keyed by hand index across frames
+
+function lerpPt(a, b, t) {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+}
+
+function smoothLandmarks(handIdx, rawLandmarks) {
+  if (!smoothedHands[handIdx]) {
+    smoothedHands[handIdx] = rawLandmarks.map(p => ({...p}));
+    return smoothedHands[handIdx];
+  }
+  const prev = smoothedHands[handIdx];
+  const t = 1 - CFG.SMOOTH_FACTOR;
+  smoothedHands[handIdx] = rawLandmarks.map((p, i) => lerpPt(prev[i], p, t));
+  return smoothedHands[handIdx];
+}
+
+// ─── PHYSICS: Elastic String ────────────────────────────────
+class ElasticString {
+  constructor(id, color1, color2) {
+    this.id = id;
+    this.nodes = [];  // [{x,y,vx,vy,pinned}]
+    this.c1 = color1 || CFG.COLORS.STRING_COLD;
+    this.c2 = color2 || CFG.COLORS.STRING_HOT;
+    this.tension = 0;
+    this.alive = true;
+    this._initNodes();
+  }
+
+  _initNodes() {
+    this.nodes = Array.from({length: CFG.PARTICLE_SEGMENTS}, (_, i) => ({
+      x: CFG.W * 0.3 + i * CFG.REST_SEG_LENGTH,
+      y: CFG.H * 0.5,
+      vx: 0, vy: 0,
+      pinned: false
+    }));
+  }
+
+  // Pin endpoints to hand landmarks (in canvas pixels)
+  setPins(p0, p1) {
+    const n = this.nodes;
+    n[0].x = p0.x; n[0].y = p0.y; n[0].pinned = true;
+    n[n.length-1].x = p1.x; n[n.length-1].y = p1.y; n[n.length-1].pinned = true;
+  }
+
+  releasePin(end) {
+    if (end === 0) this.nodes[0].pinned = false;
+    else this.nodes[this.nodes.length-1].pinned = false;
+  }
+
+  update() {
+    const n = this.nodes;
+    const seg = CFG.REST_SEG_LENGTH;
+
+    // Compute tension from endpoint distance vs rest length
+    const dx = n[n.length-1].x - n[0].x;
+    const dy = n[n.length-1].y - n[0].y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const maxDist = seg * (n.length - 1);
+    this.tension = Math.min(1, dist / maxDist);
+
+    // Physics update on free nodes
+    for (let i = 1; i < n.length - 1; i++) {
+      if (n[i].pinned) continue;
+      n[i].vy += CFG.GRAVITY;
+      n[i].vx *= CFG.SPRING_DAMPING;
+      n[i].vy *= CFG.SPRING_DAMPING;
+      n[i].x += n[i].vx;
+      n[i].y += n[i].vy;
+    }
+
+    // Constraint relaxation (Verlet-style) — multiple passes
+    for (let pass = 0; pass < 4; pass++) {
+      for (let i = 0; i < n.length - 1; i++) {
+        const a = n[i], b = n[i+1];
+        const cdx = b.x - a.x, cdy = b.y - a.y;
+        const clen = Math.sqrt(cdx*cdx + cdy*cdy) || 0.001;
+        const diff = (clen - seg) / clen * 0.5;
+        const ox = cdx * diff, oy = cdy * diff;
+        if (!a.pinned) { a.x += ox; a.y += oy; a.vx += ox * 0.3; a.vy += oy * 0.3; }
+        if (!b.pinned) { b.x -= ox; b.y -= oy; b.vx -= ox * 0.3; b.vy -= oy * 0.3; }
+      }
+    }
+  }
+}
+
+// ─── RENDERER ──────────────────────────────────────────────
+const bgCanvas = document.getElementById('bg-canvas');
+const mainCanvas = document.getElementById('main-canvas');
+const bgCtx = bgCanvas.getContext('2d');
+const ctx = mainCanvas.getContext('2d');
+
+function resizeCanvases() {
+  const wrap = document.getElementById('canvas-wrap');
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  [bgCanvas, mainCanvas].forEach(c => { c.width = w; c.height = h; });
+}
+
+function toCanvas(lm, canvas) {
+  // lm is normalized [0,1]; mirrored (x is already mirror via CSS on video,
+  // but we draw manually so we flip x here)
+  return {
+    x: (1 - lm.x) * canvas.width,
+    y: lm.y * canvas.height
+  };
+}
+
+function drawVideo(videoEl) {
+  bgCtx.save();
+  bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+  // Draw mirrored video
+  bgCtx.translate(bgCanvas.width, 0);
+  bgCtx.scale(-1, 1);
+  bgCtx.drawImage(videoEl, 0, 0, bgCanvas.width, bgCanvas.height);
+  bgCtx.restore();
+
+  // Darken + tint overlay
+  bgCtx.fillStyle = 'rgba(2,4,8,0.42)';
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+
+  // Subtle cyan tint
+  bgCtx.fillStyle = 'rgba(0,255,231,0.03)';
+  bgCtx.fillRect(0, 0, bgCanvas.width, bgCanvas.height);
+}
+
+function drawLandmarks(hand) {
+  const lm = hand.landmarks;
+  const C = mainCanvas;
+
+  // Connections (standard 21-landmark hand skeleton)
+  const connections = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [5,9],[9,10],[10,11],[11,12],
+    [9,13],[13,14],[14,15],[15,16],
+    [13,17],[17,18],[18,19],[19,20],
+    [0,17]
+  ];
+
+  ctx.strokeStyle = CFG.COLORS.CONNECTION;
+  ctx.lineWidth = 1;
+  connections.forEach(([a,b]) => {
+    const pa = toCanvas(lm[a], C), pb = toCanvas(lm[b], C);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  });
+
+  // Landmark dots
+  lm.forEach((pt, i) => {
+    const p = toCanvas(pt, C);
+    const isTip = [4,8,12,16,20].includes(i);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, isTip ? 5 : 3, 0, Math.PI*2);
+    ctx.fillStyle = isTip ? 'rgba(0,255,231,1)' : 'rgba(0,255,231,0.6)';
+    ctx.shadowColor = 'rgba(0,255,231,0.8)';
+    ctx.shadowBlur = isTip ? 12 : 5;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+function lerpColor(c1, c2, t) {
+  return [
+    Math.round(c1[0] + (c2[0]-c1[0])*t),
+    Math.round(c1[1] + (c2[1]-c1[1])*t),
+    Math.round(c1[2] + (c2[2]-c1[2])*t),
+  ];
+}
+
+function drawElasticString(str) {
+  const n = str.nodes;
+  if (n.length < 2) return;
+  const t = str.tension;
+  const col = lerpColor(str.c1, str.c2, Math.pow(t, 1.5));
+  const alpha = 0.65 + t * 0.35;
+  const width = CFG.STRING_WIDTH_MIN + t * (CFG.STRING_WIDTH_MAX - CFG.STRING_WIDTH_MIN);
+
+  // Glow passes
+  for (let g = CFG.GLOW_PASSES; g >= 0; g--) {
+    ctx.beginPath();
+    ctx.moveTo(n[0].x, n[0].y);
+    for (let i = 1; i < n.length; i++) {
+      const mx = (n[i-1].x + n[i].x) / 2;
+      const my = (n[i-1].y + n[i].y) / 2;
+      ctx.quadraticCurveTo(n[i-1].x, n[i-1].y, mx, my);
+    }
+    ctx.lineTo(n[n.length-1].x, n[n.length-1].y);
+
+    if (g > 0) {
+      // glow halo
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${0.06 + g*0.04})`;
+      ctx.lineWidth = width + g * 5;
+      ctx.shadowBlur = 0;
+    } else {
+      // core
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha})`;
+      ctx.lineWidth = width;
+      ctx.shadowColor = `rgb(${col[0]},${col[1]},${col[2]})`;
+      ctx.shadowBlur = 12 + t * 18;
+    }
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // Endpoint anchor dots
+  [n[0], n[n.length-1]].forEach(node => {
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, 4 + t*4, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},0.8)`;
+    ctx.shadowColor = `rgb(${col[0]},${col[1]},${col[2]})`;
+    ctx.shadowBlur = 14;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+// ─── STRING MANAGER ────────────────────────────────────────
+//  Strings we maintain:
+//   #0: Left index tip  ↔ Right index tip
+//   #1: Left wrist      ↔ Right wrist
+//   #2: Left thumb tip  ↔ Right thumb tip
+//   Per-hand (1 hand only): index ↔ pinky tip
+
+function ensureStrings() {
+  while (STATE.strings.length < 5) {
+    const idx = STATE.strings.length;
+    const colors = [
+      [CFG.COLORS.STRING_COLD, CFG.COLORS.STRING_HOT],
+      [[80,220,255], [255,120,200]],
+      [[255,230,0], [255,80,0]],
+      [[0,200,120], [0,120,255]],
+      [[200,0,255], [255,200,0]],
+    ];
+    STATE.strings.push(new ElasticString(idx, ...colors[idx % colors.length]));
+  }
+}
+
+function updateStrings() {
+  ensureStrings();
+  const h = STATE.hands;
+  const C = mainCanvas;
+  const s = STATE.strings;
+
+  const getLP = (handIdx, lmIdx) => {
+    const lm = h[handIdx]?.landmarks;
+    if (!lm) return null;
+    return toCanvas(lm[lmIdx], C);
+  };
+
+  // Identify which hand is left/right
+  let leftIdx = -1, rightIdx = -1;
+  h.forEach((hand, i) => {
+    const label = hand.handedness?.[0]?.label;
+    // MediaPipe reports "Left"/"Right" from the model's perspective (mirrored)
+    if (label === 'Left')  rightIdx = i;  // user's right
+    if (label === 'Right') leftIdx  = i;  // user's left
+  });
+
+  // If only one hand detected, use index 0 for both checks
+  if (leftIdx === -1 && rightIdx === -1 && h.length === 1) {
+    leftIdx = 0;
+  }
+
+  const twoHands = leftIdx !== -1 && rightIdx !== -1;
+
+  if (twoHands) {
+    // String 0: index tips
+    const p0a = getLP(leftIdx, CFG.LANDMARK.INDEX_TIP);
+    const p0b = getLP(rightIdx, CFG.LANDMARK.INDEX_TIP);
+    if (p0a && p0b) s[0].setPins(p0a, p0b);
+
+    // String 1: wrists
+    const p1a = getLP(leftIdx, CFG.LANDMARK.WRIST);
+    const p1b = getLP(rightIdx, CFG.LANDMARK.WRIST);
+    if (p1a && p1b) s[1].setPins(p1a, p1b);
+
+    // String 2: thumb tips
+    const p2a = getLP(leftIdx, CFG.LANDMARK.THUMB_TIP);
+    const p2b = getLP(rightIdx, CFG.LANDMARK.THUMB_TIP);
+    if (p2a && p2b) s[2].setPins(p2a, p2b);
+
+    // String 3: left middle ↔ right middle
+    const p3a = getLP(leftIdx, CFG.LANDMARK.MIDDLE_TIP);
+    const p3b = getLP(rightIdx, CFG.LANDMARK.MIDDLE_TIP);
+    if (p3a && p3b) s[3].setPins(p3a, p3b);
+
+    // String 4: left pinky ↔ right pinky
+    const p4a = getLP(leftIdx, CFG.LANDMARK.PINKY_TIP);
+    const p4b = getLP(rightIdx, CFG.LANDMARK.PINKY_TIP);
+    if (p4a && p4b) s[4].setPins(p4a, p4b);
+
+    s.forEach(str => str.update());
+
+  } else if (h.length === 1) {
+    // Single hand: connect index ↔ pinky, thumb ↔ pinky
+    const hi = 0;
+    const pa = getLP(hi, CFG.LANDMARK.INDEX_TIP);
+    const pb = getLP(hi, CFG.LANDMARK.PINKY_TIP);
+    if (pa && pb) s[0].setPins(pa, pb);
+
+    const pc = getLP(hi, CFG.LANDMARK.THUMB_TIP);
+    const pd = getLP(hi, CFG.LANDMARK.MIDDLE_TIP);
+    if (pc && pd) s[1].setPins(pc, pd);
+
+    s[0].update(); s[1].update();
+    // Let other strings drift
+    s[2].releasePin(0); s[2].releasePin(1); s[2].update();
+    s[3].releasePin(0); s[3].releasePin(1); s[3].update();
+    s[4].releasePin(0); s[4].releasePin(1); s[4].update();
+  } else {
+    // No hands — let strings fall
+    s.forEach(str => {
+      str.releasePin(0); str.releasePin(1); str.update();
+    });
+  }
+}
+
+// ─── PINCH DETECTION ───────────────────────────────────────
+function detectPinch(lm) {
+  const thumb = lm[CFG.LANDMARK.THUMB_TIP];
+  const index = lm[CFG.LANDMARK.INDEX_TIP];
+  const dx = thumb.x - index.x, dy = thumb.y - index.y;
+  return Math.sqrt(dx*dx + dy*dy) < CFG.PINCH_THRESHOLD;
+}
+
+// ─── MAIN RENDER LOOP ──────────────────────────────────────
+const videoEl = document.getElementById('video');
+let animRunning = false;
+
+function renderFrame() {
+  if (!animRunning) return;
+  requestAnimationFrame(renderFrame);
+
+  // FPS
+  STATE.frameCount++;
+  const now = performance.now();
+  if (now - STATE.lastFpsTime >= 500) {
+    STATE.fps = Math.round(STATE.frameCount * 1000 / (now - STATE.lastFpsTime));
+    STATE.frameCount = 0;
+    STATE.lastFpsTime = now;
+    document.getElementById('fps').textContent = STATE.fps;
+  }
+
+  // Draw video background
+  drawVideo(videoEl);
+
+  // Clear overlay canvas
+  ctx.clearRect(0, 0, mainCanvas.width, mainCanvas.height);
+
+  // Update & draw strings first (behind landmarks)
+  updateStrings();
+  STATE.strings.forEach(drawElasticString);
+
+  // Draw hand landmarks on top
+  STATE.hands.forEach(hand => drawLandmarks(hand));
+
+  // Pinch indicators
+  updatePinchUI();
+
+  // Hand status
+  const count = STATE.hands.length;
+  const statusEl = document.getElementById('hand-status');
+  statusEl.textContent = count === 0 ? 'NO HANDS' : count === 1 ? '1 HAND DETECTED' : '2 HANDS DETECTED';
+
+  // Hand count dot on canvas (HUD)
+  ctx.font = '10px Share Tech Mono';
+  ctx.fillStyle = 'rgba(0,255,231,0.35)';
+  ctx.fillText(`HANDS: ${count}`, 10, mainCanvas.height - 10);
+}
+
+function updatePinchUI() {
+  const pinchL = document.getElementById('pinch-l');
+  const pinchR = document.getElementById('pinch-r');
+
+  let lp = false, rp = false;
+  STATE.hands.forEach(hand => {
+    const label = hand.handedness?.[0]?.label;
+    const p = detectPinch(hand.landmarks);
+    if (label === 'Right') lp = p;   // mirrored
+    if (label === 'Left')  rp = p;
+  });
+
+  pinchL.classList.toggle('active', lp);
+  pinchR.classList.toggle('active', rp);
+  STATE.pinchL = lp;
+  STATE.pinchR = rp;
+}
+
+// ─── MEDIAPIPE HANDS SETUP ─────────────────────────────────
+function setupHandTracking() {
+  const hands = new Hands({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6,
+  });
+
+  hands.onResults(results => {
+    if (!results.multiHandLandmarks) {
+      STATE.hands = [];
+      STATE.rawHands = [];
+      return;
+    }
+
+    STATE.rawHands = results.multiHandLandmarks;
+    STATE.hands = results.multiHandLandmarks.map((lm, i) => ({
+      landmarks: smoothLandmarks(i, lm),
+      handedness: results.multiHandedness?.[i]?.classification
+    }));
+  });
+
+  return hands;
+}
+
+// ─── BOOT ──────────────────────────────────────────────────
+async function boot() {
+  resizeCanvases();
+  window.addEventListener('resize', resizeCanvases);
+
+  // Request webcam
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' },
+      audio: false
+    });
+  } catch(e) {
+    document.getElementById('loading-msg').innerHTML =
+      `<div style="color:#ff3c6e">CAMERA ACCESS DENIED</div>
+       <div style="font-size:0.7rem;opacity:0.6">please allow camera and reload</div>`;
+    return;
+  }
+
+  videoEl.srcObject = stream;
+  videoEl.style.display = 'block';
+  await new Promise(res => videoEl.onloadedmetadata = res);
+  await videoEl.play();
+
+  // Init hand tracker
+  const handsTracker = setupHandTracking();
+
+  // Use MediaPipe Camera utility for the processing loop
+  const camera = new Camera(videoEl, {
+    onFrame: async () => {
+      await handsTracker.send({ image: videoEl });
+    },
+    width: 640,
+    height: 480,
+  });
+  camera.start();
+
+  // Hide loading, start render
+  document.getElementById('loading-msg').style.display = 'none';
+  animRunning = true;
+  renderFrame();
+}
+
+boot();
+</script>
+</body>
+</html>
